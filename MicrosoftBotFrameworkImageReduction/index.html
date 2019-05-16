@@ -1,0 +1,130 @@
+<script>
+    async function resizeImageAsync(src) {
+        let promise = new Promise((resolve, reject) => {
+            try {
+                let image = new Image();
+                image.setAttribute("crossOrigin", "anonymous");
+
+                image.onload = async () => {
+                    let width = image.naturalWidth;
+                    let height = image.naturalHeight;
+
+                    let canvas = new OffscreenCanvas(width * 0.5, height * 0.5);
+                    let context = canvas.getContext("2d");
+                    context.drawImage(image, 0, 0, width, height, 0, 0, canvas.width, canvas.height);
+
+                    let blob = await canvas.convertToBlob();
+                    resolve(blob);
+                };
+
+                image.src = src;
+            }
+            catch (error) {
+                reject(error);
+            }
+        });
+
+        return promise;
+    }
+</script>
+<script type="module">
+    const MAX_ATTACHMENT_BYTES = 3500000;
+    import Path from "/universal-common/Path.js";
+    import MediaType from "/universal-common/MediaType.js";
+
+    document.addEventListener("DOMContentLoaded",function() {
+    (async function () {
+        let token = ""; // Retrieve a token from the conversation token endpoint @ https://directline.botframework.com/v3/directline/tokens/generate or hardcode your secret.
+        let directLine = window.WebChat.createDirectLine({ token });
+        const store = window.WebChat.createStore(
+            {},
+            ({ dispatch }) => next => async (action) => {
+                console.log(action);
+                if (action.type === "WEB_CHAT/SEND_FILES") {
+                    let files = action.payload.files;
+
+                    for (let i = 0; i < files.length; i++) {
+                        let file = files[i];
+
+                        // Resizing strategy.
+                        if (file.size > MAX_ATTACHMENT_BYTES) {
+                            let mediaType = MediaType.fromExtension(Path.getExtension(file.name));
+
+                            if (mediaType != undefined && mediaType.type === "image") {
+                                let resizedBlob = await resizeImageAsync(file.url);
+                                let resizedBlobURL = URL.createObjectURL(resizedBlob);
+
+                                while (resizedBlob.size > MAX_ATTACHMENT_BYTES) {
+                                    resizedBlob = await resizeImageAsync(resizedBlobURL);
+                                    resizedBlobURL = URL.createObjectURL(resizedBlob);
+                                }
+                                file.size = resizedBlob.size;
+                                file.url = resizedBlobURL;
+                            }
+                            else {
+                            }
+                        }
+
+                        // If you wanted to instead submit the file to a 3rd party endpoint and hack together something for your bot,
+                        // ensure that you call return without invoking the next action in the middleware pipeline.
+                        // Then you'll need to handle the blob upload to your custom endpoint.
+                        // Eg. await fetch("YOUR CUSTOM SERVICE/api/largeAttachment", { method: "POST", body: getBlob(file.url) })
+                        // You will need the monkey-patched version of the following JS APIs to enable getBlob to work, so make sure they are executed first.
+                        // Eg. You should also then fire an activity to your bot to inform it that an attachment has been received. You can send a new activity using
+                        // directLine.postActivity({}).
+
+                        /*
+                        function storeAndCreate(blob) {
+                            var url = old_create(blob);
+                            dict[url] = blob;
+                            return url
+                        }
+
+                        function forgetAndRevoke(url) {
+                            old_revoke(url);
+                            try {
+                            if(new URL(url).protocol === 'blob:')
+                                delete dict[url];
+                            }catch(e){}
+                        }
+
+                        function getBlob(url) {
+                            return dict[url];
+                        }
+
+                        const old_create = URL.createObjectURL;
+                        const old_revoke = URL.revokeObjectURL;
+                        Object.defineProperty(URL, 'createObjectURL', {
+                            get: () => storeAndCreate
+                        });
+                        Object.defineProperty(URL, 'revokeObjectURL', {
+                            get: () => forgetAndRevoke
+                        });
+                        Object.defineProperty(URL, 'getBlobFromObjectURL', {
+                            get: () => getBlob
+                        });
+                        const dict = {};
+                        */
+                    }
+                }
+                return next(action);
+            }
+        );
+
+        const styleOptions = {
+            bubbleBackground: 'rgba(236, 239, 241, 1)',
+            bubbleFromUserBackground: 'rgba(0, 120, 215, 1)',
+            bubbleFromUserTextColor: 'rgba(255, 255, 255, 1)'
+        };
+    
+        window.WebChat.renderWebChat({
+            directLine: directLine,
+            store,
+            userID: userId,
+            styleOptions,
+        }, document.getElementById('webchat'));
+    
+        document.querySelector('#webchat > *').focus();
+        })().catch(err => console.error(err));
+    });
+</script>
